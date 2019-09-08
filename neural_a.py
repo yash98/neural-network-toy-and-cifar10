@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 import math
-from decimal import Decimal
+# from decimal import Decimal
 
 
 class value_func:
@@ -42,7 +42,9 @@ class layer:
         self.weight_dimensions = weight_dimensions
         self.activation = activation
         self.weights = np.zeros(weight_dimensions)
+        self.biases = np.zeros((1, width))
         self.grad_wrt_w = np.zeros(weight_dimensions)
+        self.grad_wrt_b = np.zeros((1, width))
         # self.acc_grad_wrt_w = None
         self.z_s = None
         self.a_s = None
@@ -73,9 +75,9 @@ class neural_network:
             # (n^k-1 + 1, n^k)
             weight_dimensions = (0, 0)
             if i == 0:
-                weight_dimensions = (input_size+1, layer_widths[i])
+                weight_dimensions = (input_size, layer_widths[i])
             else:
-                weight_dimensions = (layer_widths[i-1]+1, layer_widths[i])
+                weight_dimensions = (layer_widths[i-1], layer_widths[i])
 
             self.layers.append(
                 layer(layer_widths[i], weight_dimensions, activations[i]))
@@ -88,16 +90,20 @@ class neural_network:
         self.input = x
         for i in range(len(self.layers)):
             if i == 0:
-                a = (np.append(np.ones((x.shape[0], 1)), x, axis=1))
-                b = self.layers[0].weights
-                self.layers[0].z_s = a @ b
+                # a = (np.append(np.ones((x.shape[0], 1)), x, axis=1))
+                # b = self.layers[0].weights
+                # self.layers[0].z_s = a @ b
+                self.layers[0].z_s = (
+                    self.input @ self.layers[0].weights) + self.layers[0].biases
                 self.layers[0].a_s = self.layers[0].activation.matrix_func(
                     self.layers[0].z_s)
             else:
-                a = (np.append(np.ones(
-                    (self.layers[i-1].a_s.shape[0], 1)), self.layers[i-1].a_s, axis=1))
-                b = self.layers[i].weights
-                self.layers[i].z_s = a @ b
+                # a = (np.append(np.ones(
+                #     (self.layers[i-1].a_s.shape[0], 1)), self.layers[i-1].a_s, axis=1))
+                # b = self.layers[i].weights
+                # self.layers[i].z_s = a @ b
+                self.layers[i].z_s = (
+                    self.layers[i-1].a_s @ self.layers[i].weights) + self.layers[i].biases
                 self.layers[i].a_s = self.layers[i].activation.matrix_func(
                     self.layers[i].z_s)
 
@@ -122,23 +128,28 @@ class neural_network:
                 a = self.layers[i].activation.matrix_derivative(
                     self.layers[i].z_s)
                 b = self.layers[i+1].delta
-                c = (self.layers[i+1].weights[1:, ]).T
+                c = (self.layers[i+1].weights).T
                 dE_by_dz = a * (b @ c)
                 self.layers[i].delta = dE_by_dz
 
             # grad wrt weight calculation
             if i == 0:
-                a = (
-                    np.append(np.ones((self.input.shape[0], 1)), self.input, axis=1)).T
-                b = self.layers[0].delta
-                self.layers[0].grad_wrt_w = a @ b
-                # self.layers[0].acc_grad_wrt_w += self.layers[0].grad_wrt_w
+                # a = (
+                #     np.append(np.ones((self.input.shape[0], 1)), self.input, axis=1)).T
+                # b = self.layers[0].delta
+                self.layers[0].grad_wrt_w = self.input.T @ self.layers[0].delta
+                self.layers[0].grad_wrt_b = ((np.ones(
+                    (self.input.shape[0], 1))).T) @ self.layers[0].delta
             else:
-                a = (np.append(np.ones(
-                    (self.layers[i - 1].a_s.shape[0], 1)), self.layers[i - 1].a_s, axis=1)).T
-                b = self.layers[i].delta
-                self.layers[i].grad_wrt_w = a @ b
-                # self.layers[i].acc_grad_wrt_w += self.layers[i].grad_wrt_w
+                # a = (np.append(np.ones(
+                #     (self.layers[i - 1].a_s.shape[0], 1)), self.layers[i - 1].a_s, axis=1)).T
+                # b = self.layers[i].delta
+                # self.layers[i].grad_wrt_w = a @ b
+                self.layers[i].grad_wrt_w = self.layers[i -
+                                                        1].a_s.T @ self.layers[i].delta
+                self.layers[i].grad_wrt_b = ((np.ones(
+                    (self.input.shape[0], 1))).T) @ \
+                    self.layers[i].delta
 
     # def clear_grad_wrt_w(self):
     #     for layer in self.layers:
@@ -163,16 +174,22 @@ class neural_network:
         return l
 
     def print_weights(self, outputfile_name):
-        outputfile = open(outputfile_name, "w")
+        # outputfile = open(outputfile_name, "w")
+        out_w = []
         for layer in self.layers:
-            for i in range(layer.weight_dimensions[0]):
-                for j in range(layer.weight_dimensions[1]):
-                    outputfile.write('%e' % (
-                        Decimal(layer.weights[i][j]))+"\n")
-        outputfile.close()
+            for bs in layer.biases:
+                for b in bs:
+                    out_w.append(b)
+            for ws in layer.weights:
+                for w in ws:
+                    out_w.append(w)
+        np.savetxt(outputfile_name, out_w)
+        # outputfile.close()
 
     def mini_batch_gd(self, x, y, learning_rate, batch_size, max_epoch, learning_strat, **kwargs):
         num_epoch = 0
+        num_batch = 0
+        total_batches = x.shape[0]//batch_size
         # last_error = 0.0
         # current_error = 0.0
         # curr_w = None
@@ -184,24 +201,28 @@ class neural_network:
             # current_error = 0.0
 
             # relevent input for loss function
-            d = {"batch_size": batch_size}
+            # d = {"batch_size": batch_size}
 
             self.forward_prop(
-                x[(num_epoch*batch_size) % (x.shape[0]+1):((num_epoch+1)*batch_size) % (x.shape[0]+1), :])
+                x[(num_batch*batch_size):((num_batch+1)*batch_size), :])
             # current_error += (-1/float(batch_size))*self.loss_func.func(
             #     curr_w, y)
             self.back_prop(
-                y[(num_epoch*batch_size) % (x.shape[0]+1):((num_epoch+1)*batch_size) % (x.shape[0]+1), :], **d)
+                y[(num_batch*batch_size):((num_batch+1)*batch_size), :])
 
             if learning_strat == "fixed":
                 for layer in self.layers:
                     layer.weights -= (learning_rate * layer.grad_wrt_w)
+                    layer.biases -= (learning_rate * layer.grad_wrt_b)
             elif learning_strat == "adaptive":
                 for layer in self.layers:
                     layer.weights -= ((learning_rate /
                                        math.sqrt(num_epoch)) * layer.grad_wrt_w)
+                    layer.biases -= ((learning_rate /
+                                      math.sqrt(num_epoch)) * layer.grad_wrt_b)
 
             num_epoch += 1
+            num_batch = (num_batch+1) % total_batches
 
             if "pauses" in kwargs:
                 if pause_c < len(kwargs["pauses"]):
@@ -295,11 +316,11 @@ if __name__ == "__main__":
     y = inp[:, -1:]
 
     if (int(param_lines[0])) == 1:
-        # print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
-        #                        int(param_lines[2]), "fixed", pauses=[1, 10, 20, 30, 40, 50],
-        #                        pausefile_prefix="itera"))
         print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
-                               int(param_lines[2]), "fixed"))
+                               int(param_lines[2]), "fixed", pauses=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50],
+                               pausefile_prefix="itera"))
+        # print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
+        #                        int(param_lines[2]), "fixed"))
     elif (int(param_lines[0])) == 2:
         # print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
         #                        int(param_lines[2]), "adaptive", pauses=[1, 10, 20, 30, 40, 50],
