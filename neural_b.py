@@ -1,16 +1,16 @@
 import sys
 import numpy as np
 import math
-# from decimal import Decimal
+from sklearn.preprocessing import OneHotEncoder
 
 
 class value_func:
     @classmethod
-    def func(cls, x):
+    def val_func(cls, x):
         raise NotImplementedError
 
     @classmethod
-    def derivative(cls, x):
+    def val_derivative(cls, x):
         raise NotImplementedError
 
     @classmethod
@@ -18,11 +18,11 @@ class value_func:
         raise NotImplementedError
 
     @classmethod
-    def matrix_func(cls, x):
+    def func(cls, x):
         raise NotImplementedError
 
     @classmethod
-    def matrix_derivative(cls, x):
+    def derivative(cls, x):
         raise NotImplementedError
 
 
@@ -45,13 +45,8 @@ class layer:
         self.biases = np.zeros((1, width))
         self.grad_wrt_w = np.zeros(weight_dimensions)
         self.grad_wrt_b = np.zeros((1, width))
-        # self.acc_grad_wrt_w = None
         self.z_s = None
         self.a_s = None
-        self.delta = None
-
-    # def clear_grad_wrt_w(self):
-    #     self.grad_wrt_w = np.zeros(self.weight_dimensions)
 
 
 class neural_network:
@@ -72,7 +67,7 @@ class neural_network:
 
         # make layers
         for i in range(len(layer_widths)):
-            # (n^k-1 + 1, n^k)
+            # (n^k-1, n^k)
             weight_dimensions = (0, 0)
             if i == 0:
                 weight_dimensions = (input_size, layer_widths[i])
@@ -90,21 +85,14 @@ class neural_network:
         self.input = x
         for i in range(len(self.layers)):
             if i == 0:
-                # a = (np.append(np.ones((x.shape[0], 1)), x, axis=1))
-                # b = self.layers[0].weights
-                # self.layers[0].z_s = a @ b
                 self.layers[0].z_s = (
                     self.input @ self.layers[0].weights) + self.layers[0].biases
-                self.layers[0].a_s = self.layers[0].activation.matrix_func(
+                self.layers[0].a_s = self.layers[0].activation.func(
                     self.layers[0].z_s)
             else:
-                # a = (np.append(np.ones(
-                #     (self.layers[i-1].a_s.shape[0], 1)), self.layers[i-1].a_s, axis=1))
-                # b = self.layers[i].weights
-                # self.layers[i].z_s = a @ b
                 self.layers[i].z_s = (
                     self.layers[i-1].a_s @ self.layers[i].weights) + self.layers[i].biases
-                self.layers[i].a_s = self.layers[i].activation.matrix_func(
+                self.layers[i].a_s = self.layers[i].activation.func(
                     self.layers[i].z_s)
 
         self.output = self.layers[-1].a_s
@@ -112,6 +100,8 @@ class neural_network:
 
     def back_prop(self, y, **kwargs):
         # not sure if correct for general loss function
+        last_delta = None
+        current_delta = None
         for i in range(len(self.layers)-1, -1, -1):
             # delta calculation
             if i == len(self.layers)-1:
@@ -121,39 +111,26 @@ class neural_network:
                     dE_by_da = self.loss_func.derivative(
                         self.output, y, **kwargs)
                     dE_by_dz = dE_by_da * \
-                        self.layers[-1].activation.matrix_derivative(
+                        self.layers[-1].activation.derivative(
                             self.layers[-1].z_s)
-                self.layers[-1].delta = dE_by_dz
+                current_delta = dE_by_dz
             else:
-                a = self.layers[i].activation.matrix_derivative(
-                    self.layers[i].z_s)
-                b = self.layers[i+1].delta
-                c = (self.layers[i+1].weights).T
-                dE_by_dz = a * (b @ c)
-                self.layers[i].delta = dE_by_dz
+                dE_by_dz = np.multiply(self.layers[i].activation.derivative(
+                    self.layers[i].z_s), (last_delta @ (self.layers[i+1].weights).T))
+                current_delta = dE_by_dz
 
             # grad wrt weight calculation
             if i == 0:
-                # a = (
-                #     np.append(np.ones((self.input.shape[0], 1)), self.input, axis=1)).T
-                # b = self.layers[0].delta
-                self.layers[0].grad_wrt_w = self.input.T @ self.layers[0].delta
+                self.layers[0].grad_wrt_w = self.input.T @ current_delta
                 self.layers[0].grad_wrt_b = ((np.ones(
-                    (self.input.shape[0], 1))).T) @ self.layers[0].delta
+                    (self.input.shape[0], 1))).T) @ current_delta
             else:
-                # a = (np.append(np.ones(
-                #     (self.layers[i - 1].a_s.shape[0], 1)), self.layers[i - 1].a_s, axis=1)).T
-                # b = self.layers[i].delta
-                # self.layers[i].grad_wrt_w = a @ b
                 self.layers[i].grad_wrt_w = self.layers[i -
-                                                        1].a_s.T @ self.layers[i].delta
+                                                        1].a_s.T @ current_delta
                 self.layers[i].grad_wrt_b = ((np.ones(
                     (self.input.shape[0], 1))).T) @ \
-                    self.layers[i].delta
-
-    # def clear_grad_wrt_w(self):
-    #     for layer in self.layers:
-    #         layer.clear_grad_wrt_w()
+                    current_delta
+            last_delta = current_delta
 
     def unlearn(self):
         for layer in self.layers:
@@ -200,15 +177,15 @@ class neural_network:
             # last_w = curr_w
             # current_error = 0.0
 
-            # relevent input for loss function
-            # d = {"batch_size": batch_size}
-
             self.forward_prop(
                 x[(num_batch*batch_size):((num_batch+1)*batch_size), :])
             # current_error += (-1/float(batch_size))*self.loss_func.func(
             #     curr_w, y)
             self.back_prop(
                 y[(num_batch*batch_size):((num_batch+1)*batch_size), :])
+
+            num_epoch += 1
+            num_batch = (num_batch+1) % total_batches
 
             if learning_strat == "fixed":
                 for layer in self.layers:
@@ -220,9 +197,6 @@ class neural_network:
                                        math.sqrt(num_epoch)) * layer.grad_wrt_w)
                     layer.biases -= ((learning_rate /
                                       math.sqrt(num_epoch)) * layer.grad_wrt_b)
-
-            num_epoch += 1
-            num_batch = (num_batch+1) % total_batches
 
             if "pauses" in kwargs:
                 if pause_c < len(kwargs["pauses"]):
@@ -236,32 +210,59 @@ class neural_network:
 
 class sigmoid(value_func):
     @classmethod
-    def func(cls, x):
+    def val_func(cls, x):
         return 1 / (1+math.exp(-x))
 
     @classmethod
-    def derivative(cls, x):
+    def val_derivative(cls, x):
         sigma = cls.func(x)
         return sigma*(1-sigma)
-        # return np.exp(-x) / np.square((1+np.exp(-x)))
 
     @classmethod
-    def matrix_func(cls, x):
-        return 1 / (1+np.exp(-x))
+    def func(cls, x):
+        z = np.clip(x, -500, 500)
+        return 1 / (1+np.exp(-z))
 
     @classmethod
-    def matrix_derivative(cls, x):
-        return np.exp(-x) / (np.square((1+np.exp(-x))))
+    def derivative(cls, x):
+        z = np.clip(x, -500, 500)
+        sig = sigmoid.func(z)
+        return sig*(1-sig)
 
 
 class bce_loss(matrix_func):
     @classmethod
-    def func(cls, v, y, **kwargs):
+    def func(cls, v, y):
         return -1*(y*np.log(v) + (1-y)*np.log(1-v))
 
     @classmethod
-    def derivative(cls, v, y, **kwargs):
+    def derivative(cls, v, y):
         return (((1-y)/(1-v))-(y/v))
+
+    @classmethod
+    def last_delta_calc(cls, v, y):
+        return (v - y) / v.shape[0]
+
+
+class softmax(matrix_func):
+    @classmethod
+    def func(cls, x):
+        ex = np.exp(x)
+        return (ex.T / np.sum(ex, axis=1)).T
+
+    # softmax cant be applied to intermediatary layers
+    # so no derivative, derivative of 1d becomes 2d
+
+
+class cross_entropy_loss(matrix_func):
+    @classmethod
+    def func(cls, v, y):
+        return (-1/v.shape[0])*(np.sum(v*y, axis=0))
+
+    # not implementing right now
+    # @classmethod
+    # def derivative(cls, v, y):
+    #     return (((1-y)/(1-v))-(y/v))
 
     @classmethod
     def last_delta_calc(cls, v, y):
@@ -278,26 +279,30 @@ if __name__ == "__main__":
     param_lines = param.readlines()
 
     widths = [int(s) for s in param_lines[4:]]
-    widths.append(1)
-    activation_l = [sigmoid for i in range(len(widths))]
-    nn = neural_network(widths, activation_l, 2, 1, bce_loss)
+    widths.append(10)
+    activation_l = [sigmoid for i in range(len(widths)-1)]
+    activation_l.append(softmax)
+    nn = neural_network(widths, activation_l, 1024, 10, cross_entropy_loss)
 
     inp = np.loadtxt(trainfile_name, delimiter=",")
     x = inp[:, :-1]
     y = inp[:, -1:]
+    y_enc = OneHotEncoder(handle_unknown='ignore', n_values=10)
+    y_enc.fit(y)
+    y = y_enc.transform(y).toarray()
 
     if (int(param_lines[0])) == 1:
-        print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
-                               int(param_lines[2]), "fixed", pauses=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50],
-                               pausefile_prefix="itera"))
         # print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
-        #                        int(param_lines[2]), "fixed"))
-    elif (int(param_lines[0])) == 2:
-        # print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
-        #                        int(param_lines[2]), "adaptive", pauses=[1, 10, 20, 30, 40, 50],
+        #                        int(param_lines[2]), "fixed", pauses=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50],
         #                        pausefile_prefix="itera"))
         print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
-                               int(param_lines[2]), "adaptive"))
+                               int(param_lines[2]), "fixed"))
+    elif (int(param_lines[0])) == 2:
+        print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
+                               int(param_lines[2]), "adaptive", pauses=[1, 10, 20, 30, 40, 50],
+                               pausefile_prefix="itera"))
+        # print(nn.mini_batch_gd(x, y, float(param_lines[1]), int(param_lines[3]),
+        #                        int(param_lines[2]), "adaptive"))
 
     nn.print_weights(weightfile_name)
     param.close()
